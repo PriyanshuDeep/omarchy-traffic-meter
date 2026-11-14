@@ -5,6 +5,8 @@ so there is no separate binary to place on `PATH` and no service to enable.
 
 For what the bar and the panel show and why the widget measures the physical
 link rather than following the default route, see the [README](../README.md).
+The panel's history dropdown provides persistent daily, weekly, monthly and
+yearly usage views, covering every recorded period.
 
 ## Requirements
 

@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.priyanshudeep.traffic-meter",
   "name": "Omarchy Traffic Meter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "PriyanshuDeep",
   "license": "MIT",
-  "description": "Live upload and download on the active physical link, with VPN details and persistent selectable usage history",
+  "description": "Live upload and download with persistent daily, weekly, monthly and yearly usage history",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Omarchy Traffic Meter",
-    "description": "Live upload and download, active interface and VPN details, and persistent daily, weekly, monthly and yearly usage history",
+    "description": "Live upload and download, active interface and VPN details, plus persistent usage history with daily, weekly, monthly and yearly views",
     "category": "Network",
     "aliases": [
       "network",

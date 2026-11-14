@@ -2,7 +2,7 @@
 
 An Omarchy bar widget for live upload and download rates on the connected
 physical network link. The panel shows the active Wi-Fi or Ethernet interface,
-VPN state, and persistent data usage grouped by day, ISO week, month or year.
+VPN state, and persistent data usage in daily, weekly, monthly and yearly views.
 
 The usage collector counts physical interfaces, so switching between Wi-Fi and
 Ethernet does not discard totals. It saves daily counters under
@@ -37,6 +37,27 @@ Delete that directory separately if you also want to remove the history.
 - Persistent records across reboots and network interface counter resets.
 - A short-lived VPN status and tunnel speed view.
 - Selectable bar text weight: Normal, Medium, DemiBold or Bold.
+
+The history dropdown lists every recorded daily date, ISO week, calendar
+month or calendar year. The history is stored locally and survives reboots.
+
+### History views
+
+**Day**
+
+![Daily persistent data usage](docs/screenshots/usage-day.png)
+
+**Week**
+
+![Weekly persistent data usage](docs/screenshots/usage-week.png)
+
+**Month**
+
+![Monthly persistent data usage](docs/screenshots/usage-month.png)
+
+**Year**
+
+![Yearly persistent data usage](docs/screenshots/usage-year.png)
 
 The panel loads the complete saved history when opened. Measurements start
 when the plugin is installed; traffic before that cannot be reconstructed.

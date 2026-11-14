@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1
+
+### Changed
+
+- Made persistent daily, weekly, monthly and yearly history explicit in the
+  marketplace description and README, and added screenshots of all four views.
+- Set the daily history view as the marketplace preview.
+
 ## 1.0.0
 
 ### Added
