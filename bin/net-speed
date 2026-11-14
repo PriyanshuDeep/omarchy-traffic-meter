@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Emit one snapshot of network counters as JSON, for the
-brightwalker25.net-speed bar widget.
+io.github.priyanshudeep.traffic-meter bar widget.
 
 Usage: net-speed [--iface auto|NAME] [--no-record]
 
@@ -26,9 +26,10 @@ import sys
 import time
 
 VERSION = 1
-WRITE_INTERVAL_S = 30
-KEEP_DAYS = 31
-SHOW_DAYS = 7
+WRITE_INTERVAL_S = 5
+# Daily records are small; retain them for a century so yearly and lifetime
+# totals can be rebuilt without losing the underlying history.
+KEEP_DAYS = 36525
 
 TUNNEL_PREFIXES = ("wg", "tun", "proton", "tailscale", "nordlynx", "mullvad")
 ARPHRD_ETHER = 1
@@ -141,7 +142,7 @@ def default_routes(proc):
 
 
 def pick_link(ifaces, routes):
-    candidates = [i for i in ifaces if i["physical"] and i["_operstate"] == "up"]
+    candidates = [i for i in ifaces if i["physical"] and i["up"]]
     if not candidates:
         return None
     routed = [i for i in candidates if i["name"] in routes]
@@ -170,8 +171,30 @@ def state_path():
         xdg = os.environ.get("XDG_STATE_HOME") or os.path.join(
             os.path.expanduser("~"), ".local", "state"
         )
-        base = os.path.join(xdg, "omarchy-net-speed")
+        base = os.path.join(xdg, "omarchy-traffic-meter")
     return os.path.join(base, "usage.json")
+
+
+def legacy_state_path():
+    """Original Net Speed Colour history, migrated on first use of this fork."""
+    if os.environ.get("NET_SPEED_STATE"):
+        return None
+    xdg = os.environ.get("XDG_STATE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local", "state"
+    )
+    return os.path.join(xdg, "omarchy-net-speed", "usage.json")
+
+
+def load_plugin_state(path):
+    state, is_new = load_state(path)
+    if state is not None:
+        return state, is_new
+    legacy = legacy_state_path()
+    if legacy:
+        state, is_new = load_state(legacy)
+        if state is not None:
+            return state, False
+    return None, True
 
 
 def load_state(path):
@@ -212,9 +235,9 @@ def save_state(path, state):
 
 
 def record_usage(ifaces, proc, today, record):
-    """Update the usage file and return (today_entry, days_list)."""
+    """Update persistent counters and return today's totals."""
     path = state_path()
-    state, is_new = load_state(path)
+    state, is_new = load_plugin_state(path)
     boot_id = read(os.path.join(proc, "sys", "kernel", "random", "boot_id"), "")
     physical = {i["name"]: i for i in ifaces if i["physical"]}
 
@@ -269,7 +292,8 @@ def record_usage(ifaces, proc, today, record):
             state["v"] = VERSION
             save_state(path, state)
 
-    return summarise(days, today)
+    entry = days.get(today, {})
+    return {"date": today, "rx": counter(entry.get("rx")), "tx": counter(entry.get("tx"))}
 
 
 def summarise(days, today):
@@ -277,25 +301,51 @@ def summarise(days, today):
 
     start = date.fromisoformat(today)
     listed = []
-    for n in range(SHOW_DAYS):
-        d = (start - timedelta(days=n)).isoformat()
-        entry = days.get(d)
-        if n == 0 or isinstance(entry, dict):
-            entry = entry if isinstance(entry, dict) else {}
-            listed.append({"date": d, "rx": counter(entry.get("rx")), "tx": counter(entry.get("tx"))})
-    return listed[0], listed
+    weekly, monthly, yearly = {}, {}, {}
+    all_time = {"rx": 0, "tx": 0}
+    for iso, entry in days.items():
+        try:
+            day = date.fromisoformat(iso)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(entry, dict) or day > start:
+            continue
+        rx, tx = counter(entry.get("rx")), counter(entry.get("tx"))
+        listed.append({"date": iso, "rx": rx, "tx": tx})
+        all_time["rx"] += rx
+        all_time["tx"] += tx
+        week_key = day.strftime("%G-W%V")
+        week = weekly.setdefault(week_key, {"period": week_key, "rx": 0, "tx": 0})
+        week["rx"] += rx
+        week["tx"] += tx
+        month_key = day.strftime("%Y-%m")
+        month = monthly.setdefault(month_key, {"period": month_key, "rx": 0, "tx": 0})
+        month["rx"] += rx
+        month["tx"] += tx
+        year_key = day.strftime("%Y")
+        year = yearly.setdefault(year_key, {"period": year_key, "rx": 0, "tx": 0})
+        year["rx"] += rx
+        year["tx"] += tx
+
+    listed.sort(key=lambda row: row["date"], reverse=True)
+    def ordered(values):
+        return [values[k] for k in sorted(values, reverse=True)]
+
+    return listed, ordered(weekly), ordered(monthly), ordered(yearly), all_time
 
 
 # Entry point ---------------------------------------------------------------
 
 
 def parse_args(argv):
-    iface, record, errors = "auto", True, []
+    iface, record, history_only, errors = "auto", True, False, []
     args = list(argv)
     while args:
         arg = args.pop(0)
         if arg == "--no-record":
             record = False
+        elif arg == "--history":
+            history_only, record = True, False
         elif arg == "--iface":
             if args:
                 iface = args.pop(0) or "auto"
@@ -305,7 +355,7 @@ def parse_args(argv):
             iface = arg.split("=", 1)[1] or "auto"
         else:
             errors.append("unknown argument: %s" % arg)
-    return iface, record, errors
+    return iface, record, history_only, errors
 
 
 def collect(argv):
@@ -317,15 +367,27 @@ def collect(argv):
         "ifaces": [],
         "today": None,
         "days": [],
+        "weeks": [],
+        "months": [],
+        "years": [],
+        "allTime": {"rx": 0, "tx": 0},
         "error": None,
     }
     errors = []
-    wanted, record, arg_errors = parse_args(argv)
+    wanted, record, history_only, arg_errors = parse_args(argv)
     errors.extend(arg_errors)
 
     sysfs = os.environ.get("NET_SPEED_SYSFS") or "/sys/class/net"
     proc = os.environ.get("NET_SPEED_PROC") or "/proc"
     today = os.environ.get("NET_SPEED_TODAY") or time.strftime("%Y-%m-%d")
+
+    if history_only:
+        state, _ = load_plugin_state(state_path())
+        days = state.get("days", {}) if state else {}
+        out["days"], out["weeks"], out["months"], out["years"], out["allTime"] = summarise(days, today)
+        out["today"] = next((row for row in out["days"] if row["date"] == today),
+                            {"date": today, "rx": 0, "tx": 0})
+        return out
 
     ifaces = []
     try:
@@ -357,7 +419,7 @@ def collect(argv):
         errors.append("scan failed: %s" % e)
 
     try:
-        out["today"], out["days"] = record_usage(ifaces, proc, today, record)
+        out["today"] = record_usage(ifaces, proc, today, record)
     except Exception as e:  # noqa: BLE001
         errors.append("usage failed: %s" % e)
         out["today"] = {"date": today, "rx": 0, "tx": 0}

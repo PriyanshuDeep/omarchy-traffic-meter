@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.0
+
+### Added
+
+- Persistent daily, weekly, monthly, yearly and all-time traffic summaries,
+  backed by daily records retained for 100 years and saved every five seconds.
+- A bar text weight setting with Normal, Medium, DemiBold and Bold options.
+- A Day / Week / Month / Year selector that lists every recorded period from
+  the plugin's history.
+- The active physical Wi-Fi or Ethernet interface is selected from all
+  connected interfaces; usage totals continue to include all physical links.
+- The panel was simplified by removing CPU, memory and the speed graph.
+- Replaced the separate history sections with one period dropdown, showing
+  every recorded daily date, ISO week, month or year.
+- Published as a distinct derivative with preserved MIT notices, upstream
+  attribution and a unique plugin ID.
+
 ## 0.3.1 - 2026-09-26
 
 ### Changed

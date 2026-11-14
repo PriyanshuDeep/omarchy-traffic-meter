@@ -9,17 +9,16 @@ import qs.Ui
 // below is what the bar requires of any widget hosting a panel, and this file
 // follows that implementation closely. See LICENSE for the full notice.
 
-// Live upload over download for the physical Wi-Fi or Ethernet link, in two
-// small rows. Clicking opens the panel with the tunnel, a short graph and
-// the daily totals.
+// Live upload over download for the connected physical Wi-Fi or Ethernet
+// link, in two small rows. Clicking opens the interface and usage details.
 //
 // The bar widget owns the collector, not the panel: the rows are live, so
 // `bin/net-speed` runs every intervalMs whether or not the panel is open.
-// The panel reads everything it shows from this file (snapshot, the rates,
-// history and formatRate) and never runs the collector itself.
+// The panel reads live rates from this widget and requests the persisted
+// usage history only when opened.
 BarWidget {
   id: root
-  moduleName: "brightwalker25.net-speed"
+  moduleName: "io.github.priyanshudeep.traffic-meter"
 
   // ---- Settings
 
@@ -35,6 +34,13 @@ BarWidget {
   }
 
   readonly property string units: String(setting("units", "bits")) === "bytes" ? "bytes" : "bits"
+  readonly property string fontWeightName: String(setting("fontWeight", "DemiBold"))
+  readonly property int meterFontWeight: {
+    if (root.fontWeightName === "Normal") return Font.Normal
+    if (root.fontWeightName === "Medium") return Font.Medium
+    if (root.fontWeightName === "Bold") return Font.Bold
+    return Font.DemiBold
+  }
 
   // ---- What the panel reads
 
@@ -47,6 +53,7 @@ BarWidget {
   property real linkTx: -1
   property real tunnelRx: -1
   property real tunnelTx: -1
+  property var usageHistory: ({ days: [], weeks: [], months: [], years: [] })
 
   // One entry per sample, newest last, at most maxHistory entries:
   // {rx, tx, trx, ttx} in bytes per second (-1 when unknown) plus dt, the
@@ -208,6 +215,35 @@ BarWidget {
     }
   }
 
+  function loadHistory() {
+    if (!historyProc.running) historyProc.running = true
+  }
+
+  Process {
+    id: historyProc
+    command: [root.collector, "--history"]
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var result = JSON.parse(String(text || ""))
+          if (result && result.days && Array.isArray(result.days)) root.usageHistory = result
+        } catch (e) {
+          root.error = "Could not parse usage history"
+        }
+      }
+    }
+  }
+
+  Timer {
+    running: root.opened
+    interval: 60000
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.loadHistory()
+  }
+
   Timer {
     running: true
     interval: root.intervalMs
@@ -228,11 +264,13 @@ BarWidget {
   }
 
   function togglePanel() {
+    root.loadHistory()
     if (panelLoader.item && panelLoader.item.toggle) panelLoader.item.toggle()
   }
 
   function refresh() {
     root.poll()
+    root.loadHistory()
   }
 
   // Shape contract for shell.summon/hide/toggle routing: Bar.findPanelWidget
@@ -240,6 +278,7 @@ BarWidget {
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
 
   function open() {
+    root.loadHistory()
     if (panelLoader.item && panelLoader.item.openFromHotkey) panelLoader.item.openFromHotkey()
   }
 
@@ -301,6 +340,7 @@ BarWidget {
     id: arrowProbe
     font.family: root.fontFamily
     font.pixelSize: root.rowFontSize
+    font.weight: root.meterFontWeight
     text: "↑"
   }
 
@@ -308,6 +348,7 @@ BarWidget {
     id: valueProbe
     font.family: root.fontFamily
     font.pixelSize: root.rowFontSize
+    font.weight: root.meterFontWeight
     text: root.units === "bits" ? "888 Kb/s" : "8888 KB/s"
   }
 
@@ -360,6 +401,7 @@ BarWidget {
             color: row.modelData.tint
             font.family: root.fontFamily
             font.pixelSize: root.rowFontSize
+            font.weight: root.meterFontWeight
             renderType: Text.NativeRendering
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
@@ -374,6 +416,7 @@ BarWidget {
             color: row.modelData.tint
             font.family: root.fontFamily
             font.pixelSize: root.rowFontSize
+            font.weight: root.meterFontWeight
             font.features: { "tnum": 1 }
             renderType: Text.NativeRendering
             horizontalAlignment: Text.AlignRight

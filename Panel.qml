@@ -8,9 +8,8 @@ import qs.Ui
 // (https://github.com/basecamp/omarchy, MIT, Copyright (c) David Heinemeier
 // Hansson). See LICENSE for the full notice.
 
-// The panel behind the bar readout: the physical link and the VPN tunnel side
-// by side, a short graph of the link, the overhead the tunnel adds, and how
-// much data the machine has moved today and over the last week.
+// The panel behind the bar readout: the active physical link, VPN details,
+// and persistent usage history grouped by day, ISO week, month or year.
 //
 // It runs nothing. The bar widget runs `bin/net-speed`, keeps the last two
 // snapshots and derives the rates; this file reads all of that from
@@ -18,8 +17,8 @@ import qs.Ui
 // can never disagree about what the current speed is.
 Panel {
   id: root
-  moduleName: "brightwalker25.net-speed"
-  ipcTarget: "brightwalker25.net-speed"
+  moduleName: "io.github.priyanshudeep.traffic-meter"
+  ipcTarget: "io.github.priyanshudeep.traffic-meter"
   manageIpc: false
 
   property var anchorItem: null
@@ -110,14 +109,6 @@ Panel {
     return Math.max(0, (linkBytes - tunBytes) / tunBytes)
   }
 
-  // Seconds of history in view, for the caption under the graph.
-  readonly property real historySpan: {
-    var t = 0
-    for (var i = 0; i < root.history.length; i++)
-      t += root.history[i] ? Number(root.history[i].dt) || 0 : 0
-    return t
-  }
-
   // The bar widget's own error covers a run that failed or could not be
   // parsed; the snapshot's covers a run that worked but found a problem.
   readonly property string errorText: {
@@ -125,16 +116,27 @@ Panel {
     return snap && snap.error ? String(snap.error) : ""
   }
 
-  readonly property var today: snap && snap.today ? snap.today : null
-  readonly property var days: snap && snap.days ? snap.days : []
+  property string historyPeriod: "day"
+  readonly property var usageHistory: hostWidget && hostWidget.usageHistory
+    ? hostWidget.usageHistory : ({ days: [], weeks: [], months: [], years: [] })
+  readonly property var historyEntries: {
+    if (root.historyPeriod === "week") return root.usageHistory.weeks || []
+    if (root.historyPeriod === "month") return root.usageHistory.months || []
+    if (root.historyPeriod === "year") return root.usageHistory.years || []
+    return root.usageHistory.days || []
+  }
 
-  readonly property var weekTotal: {
-    var rx = 0, tx = 0
-    for (var i = 0; i < root.days.length; i++) {
-      rx += root.days[i].rx || 0
-      tx += root.days[i].tx || 0
+  function periodLabel(period, kind) {
+    if (kind === "year") return String(period)
+    if (kind === "month") {
+      var p = String(period).split("-")
+      return p.length === 2 ? Qt.formatDate(new Date(Number(p[0]), Number(p[1]) - 1, 1), "MMMM yyyy") : String(period)
     }
-    return { rx: rx, tx: tx }
+    if (kind === "week") {
+      var w = String(period).split("-W")
+      return w.length === 2 ? "Week " + w[1] + ", " + w[0] : String(period)
+    }
+    return root.fmtDay(period)
   }
 
   // -------------------------------------------------------------- formatting
@@ -157,11 +159,10 @@ Panel {
   }
 
   function fmtDay(iso) {
-    if (root.today && iso === root.today.date) return "Today"
     var p = String(iso || "").split("-")
     if (p.length !== 3) return String(iso || "")
     var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]))
-    return Qt.formatDate(d, "ddd d MMM")
+    return Qt.formatDate(d, "d MMM yyyy")
   }
 
   // ------------------------------------------------------- open/close contract
@@ -176,11 +177,13 @@ Panel {
 
   function open() {
     openedFromHotkey = false
+    if (hostWidget && hostWidget.loadHistory) hostWidget.loadHistory()
     root.controller.show()
   }
 
   function openFromHotkey() {
     openedFromHotkey = true
+    if (hostWidget && hostWidget.loadHistory) hostWidget.loadHistory()
     root.controller.show()
   }
 
@@ -331,6 +334,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: historyDropdown.popupOpen
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
@@ -455,171 +459,62 @@ Panel {
             }
           }
 
-          // ---- Graph: download and upload on the physical link, newest on
-          // the right, scaled to the busiest moment in view.
-          Column {
-            width: parent.width
-            spacing: Style.spacing.xs
-
-            Canvas {
-              id: graph
-              width: parent.width
-              height: Style.space(64)
-
-              readonly property var samples: root.history
-              readonly property real peak: {
-                var m = 0
-                for (var i = 0; i < samples.length; i++) {
-                  var e = samples[i]
-                  if (!e) continue
-                  if (e.rx > m) m = e.rx
-                  if (e.tx > m) m = e.tx
-                }
-                return m
-              }
-              // A floor on the scale, so an idle link draws as a flat line
-              // along the bottom rather than magnifying a few stray packets
-              // to fill the height.
-              readonly property real ceiling: Math.max(peak, 4096)
-              readonly property color downColor: root.downColor
-              readonly property color upColor: root.upColor
-              readonly property color gridColor: Style.selectedFillFor(root.foreground, Color.accent)
-
-              onSamplesChanged: requestPaint()
-              onWidthChanged: requestPaint()
-              onHeightChanged: requestPaint()
-              onDownColorChanged: requestPaint()
-              onUpColorChanged: requestPaint()
-
-              function trace(ctx, key, colour) {
-                var s = graph.samples
-                var n = s.length
-                if (n < 2) return
-                // Always 120 slots wide, so the graph fills from the right
-                // and the time axis does not stretch while history builds.
-                var slots = 119
-                var step = graph.width / slots
-                var inset = 1
-                var h = graph.height - 2 * inset
-                ctx.beginPath()
-                ctx.strokeStyle = colour
-                ctx.lineWidth = Math.max(1, Style.space(1.5))
-                ctx.lineJoin = "round"
-                // A failed run leaves -1 in the history. It is drawn as a
-                // break in the line, because a drop to zero would claim the
-                // link went quiet when nothing was measured at all.
-                var pen = false
-                for (var i = 0; i < n; i++) {
-                  var raw = s[i] ? Number(s[i][key]) : -1
-                  if (!(raw >= 0)) { pen = false; continue }
-                  var x = graph.width - (n - 1 - i) * step
-                  var y = inset + h - Math.min(1, raw / graph.ceiling) * h
-                  if (pen) ctx.lineTo(x, y)
-                  else ctx.moveTo(x, y)
-                  pen = true
-                }
-                ctx.stroke()
-              }
-
-              onPaint: {
-                var ctx = getContext("2d")
-                ctx.reset()
-                ctx.fillStyle = graph.gridColor
-                ctx.fillRect(0, 0, graph.width, graph.height)
-                trace(ctx, "tx", graph.upColor)
-                trace(ctx, "rx", graph.downColor)
-              }
-            }
-
-            Item {
-              width: parent.width
-              implicitHeight: legend.implicitHeight
-
-              Row {
-                id: legend
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.spacing.sm
-
-                Rectangle {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(10); height: Math.max(1, Style.space(2))
-                  color: graph.downColor
-                }
-                Text {
-                  textFormat: Text.PlainText
-                  text: "down"
-                  color: root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-                Rectangle {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(10); height: Math.max(1, Style.space(2))
-                  color: graph.upColor
-                }
-                Text {
-                  textFormat: Text.PlainText
-                  text: "up"
-                  color: root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-              }
-
-              Text {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                textFormat: Text.PlainText
-                text: {
-                  var secs = Math.round(root.historySpan)
-                  if (secs < 2) return ""
-                  var span = secs >= 90 ? Math.round(secs / 60) + " min" : secs + " s"
-                  return "last " + span + ", peak " + root.fmtRate(graph.peak)
-                }
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-              }
-            }
-          }
-
-          // ---- Usage: counted on physical interfaces only, so tunnel bytes
-          // are never counted twice.
+          // ---- Usage history: switch the view to daily, ISO-weekly, monthly or yearly totals.
           Column {
             width: parent.width
             spacing: Style.spacing.md
-            visible: root.days.length > 0 || root.today !== null
+            visible: true
 
-            SectionHeading { width: parent.width; title: "DATA USED" }
+            Row {
+              width: parent.width
+              spacing: Style.spacing.md
+              SectionHeading {
+                width: parent.width - historyDropdown.width - parent.spacing
+                title: "DATA USAGE"
+              }
+              Dropdown {
+                id: historyDropdown
+                width: 150
+                showLabel: false
+                fontFamily: root.fontFamily
+                options: [
+                  { value: "day", label: "Day" },
+                  { value: "week", label: "Week" },
+                  { value: "month", label: "Month" },
+                  { value: "year", label: "Year" }
+                ]
+                value: root.historyPeriod
+                onChanged: function(value) { root.historyPeriod = value }
+              }
+            }
 
             SpeedRow {
               width: parent.width
               label: ""
-              up: "↑ up"
-              down: "↓ down"
+              up: "↑ upload"
+              down: "↓ download"
               muted: true
             }
 
             Repeater {
-              model: root.days
+              model: root.historyEntries
               delegate: SpeedRow {
                 required property var modelData
                 required property int index
                 width: parent.width
-                label: root.fmtDay(modelData.date)
+                label: root.periodLabel(root.historyPeriod === "day" ? modelData.date : modelData.period, root.historyPeriod)
                 up: root.fmtBytes(modelData.tx)
                 down: root.fmtBytes(modelData.rx)
                 muted: index > 0
               }
             }
 
-            SpeedRow {
+            StatRow {
               width: parent.width
-              visible: root.days.length > 1
-              label: root.days.length + " days"
-              up: root.fmtBytes(root.weekTotal.tx)
-              down: root.fmtBytes(root.weekTotal.rx)
+              visible: root.historyEntries.length === 0
+              label: "No usage history recorded yet"
+              value: ""
+              muted: true
             }
           }
 

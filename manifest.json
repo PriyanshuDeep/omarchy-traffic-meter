@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "brightwalker25.net-speed",
-  "name": "Net Speed Colour",
-  "version": "0.3.1",
-  "author": "brightwalker25",
+  "id": "io.github.priyanshudeep.traffic-meter",
+  "name": "Omarchy Traffic Meter",
+  "version": "1.0.0",
+  "author": "PriyanshuDeep",
   "license": "MIT",
-  "description": "Live upload and download on the physical network link, with the VPN tunnel and daily usage in a panel",
+  "description": "Live upload and download on the active physical link, with VPN details and persistent selectable usage history",
   "kinds": [
     "bar-widget"
   ],
@@ -13,8 +13,8 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Net Speed Colour",
-    "description": "Upload over download for the physical Wi-Fi or Ethernet link, never a tunnel or kill-switch interface. The panel shows the VPN tunnel beside it, a short speed graph and the data used today and over the last seven days",
+    "displayName": "Omarchy Traffic Meter",
+    "description": "Live upload and download, active interface and VPN details, and persistent daily, weekly, monthly and yearly usage history",
     "category": "Network",
     "aliases": [
       "network",
@@ -31,7 +31,8 @@
     "defaults": {
       "intervalMs": 1000,
       "interface": "auto",
-      "units": "bits"
+      "units": "bits",
+      "fontWeight": "DemiBold"
     },
     "schema": [
       {
@@ -61,6 +62,14 @@
         ],
         "defaultValue": "bits",
         "description": "bits shows Kb/s and Mb/s (1000 base), as broadband speeds are quoted; bytes shows KB/s and MB/s (1024 base). Both change unit with the speed."
+      },
+      {
+        "key": "fontWeight",
+        "type": "enum",
+        "label": "Bar text weight",
+        "options": ["Normal", "Medium", "DemiBold", "Bold"],
+        "defaultValue": "DemiBold",
+        "description": "Choose how prominent the upload and download readout looks in the menu bar."
       }
     ]
   }
